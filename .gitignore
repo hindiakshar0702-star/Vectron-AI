@@ -1,0 +1,47 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# --- ML artefacts ---
+data/raw/
+data/clean/
+data/captions.jsonl
+data/train.jsonl
+data/eval.jsonl
+checkpoints/
+runs/
+wandb/
+outputs/
+*.pt
+*.bin
+*.safetensors
+*.gguf
+
+# --- HF cache ---
+.cache/
+hf_cache/
+
+# --- Editor / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Logs ---
+*.log
+logs/
