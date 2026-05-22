@@ -58,15 +58,51 @@ Vectron-AI/
 
 ## Quickstart
 
-### 1. Setup (local or Colab)
+### 1. Setup
+
+> **For real training, use Colab or a Linux machine with a GPU.**
+> The local install is fine for code editing and data preparation only.
+> See the [Hardware Requirements](#hardware-requirements) section.
+
+#### Linux / macOS
 
 ```bash
 git clone https://github.com/hindiakshar0702-star/Vectron-AI.git
 cd Vectron-AI
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
 pip install -r requirements.txt
 python scripts/check_environment.py
 ```
+
+#### Windows (PowerShell)
+
+PowerShell does not support `&&` and uses `Scripts\Activate.ps1` instead of `bin/activate`.
+
+```powershell
+git clone https://github.com/hindiakshar0702-star/Vectron-AI.git
+cd Vectron-AI
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+python scripts/check_environment.py
+```
+
+If `Activate.ps1` is blocked by policy, run once:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+
+If `python` opens the Microsoft Store, install real Python from
+[python.org](https://www.python.org/downloads/) and tick **"Add Python to PATH"**
+during install.
+
+> **Windows + training caveats:** `bitsandbytes` (used for 4-bit quantization)
+> is not officially supported on native Windows, and `cairosvg` needs GTK runtime
+> libraries. For training on Windows, use **WSL2** (Ubuntu) or run training in Colab.
 
 ### 2. Get data (~200K free icons)
 
