@@ -33,6 +33,17 @@ from tqdm import tqdm
 
 
 API_BASE = "https://api.iconify.design"
+
+# Iconify publishes complete collection JSON files via jsDelivr / GitHub.
+# The api.iconify.design "/{prefix}.json" endpoint requires an `?icons=...`
+# parameter and does NOT return the full collection without it; using these
+# CDN URLs is the official way to get all icons in one request.
+COLLECTION_JSON_URLS = [
+    "https://cdn.jsdelivr.net/npm/@iconify/json@latest/json/{prefix}.json",
+    "https://cdn.jsdelivr.net/gh/iconify/icon-sets@master/json/{prefix}.json",
+    "https://raw.githubusercontent.com/iconify/icon-sets/master/json/{prefix}.json",
+]
+
 DEFAULT_COLLECTIONS = [
     "mdi",          # Material Design Icons (~7K)
     "lucide",       # Lucide (~1.5K)
@@ -50,16 +61,49 @@ log = logging.getLogger("download_iconify")
 
 
 def fetch_collections() -> dict:
+    """Returns metadata for every collection (name, total, license)."""
     r = requests.get(f"{API_BASE}/collections", timeout=30)
     r.raise_for_status()
-    return r.json()
+    data = r.json()
+    if not isinstance(data, dict):
+        raise RuntimeError(f"unexpected /collections response: {type(data).__name__}")
+    return data
 
 
 def fetch_collection(prefix: str) -> dict:
-    """Returns the bulk JSON for a single collection."""
-    r = requests.get(f"{API_BASE}/{prefix}.json", timeout=120)
-    r.raise_for_status()
-    return r.json()
+    """Fetch the full Iconify collection JSON for `prefix`.
+
+    Tries several mirrors (jsDelivr -> GitHub raw) because the api.iconify.design
+    endpoint requires an `?icons=...` filter and won't return the whole set.
+    Always returns a dict on success; raises RuntimeError if every mirror fails
+    or the response is not a JSON object containing an `icons` field.
+    """
+    last_error: Exception | None = None
+    for url_template in COLLECTION_JSON_URLS:
+        url = url_template.format(prefix=prefix)
+        try:
+            r = requests.get(url, timeout=180)
+            r.raise_for_status()
+            data = r.json()
+        except Exception as e:  # noqa: BLE001
+            last_error = e
+            log.debug("  mirror failed: %s -> %s", url, e)
+            continue
+
+        if not isinstance(data, dict):
+            last_error = RuntimeError(
+                f"unexpected response type {type(data).__name__} from {url}"
+            )
+            continue
+        if "icons" not in data or not isinstance(data["icons"], dict):
+            last_error = RuntimeError(f"response from {url} is missing 'icons' dict")
+            continue
+
+        return data
+
+    raise RuntimeError(
+        f"could not fetch collection '{prefix}' from any mirror; last error: {last_error}"
+    )
 
 
 def build_svg(icon_body: str, width: int, height: int, view_box: str | None = None) -> str:
@@ -74,18 +118,28 @@ def build_svg(icon_body: str, width: int, height: int, view_box: str | None = No
 
 def iter_icons(coll: dict) -> Iterable[tuple[str, str, dict]]:
     """Yield (name, svg_string, meta) for each icon in a collection JSON."""
-    icons = coll.get("icons", {})
-    aliases = coll.get("aliases", {})
+    if not isinstance(coll, dict):
+        return
+
+    icons = coll.get("icons", {}) or {}
+    aliases = coll.get("aliases", {}) or {}
     width = coll.get("width", 24)
     height = coll.get("height", 24)
-    categories = coll.get("categories", {})
+    categories = coll.get("categories", {}) or {}
+
+    if not isinstance(icons, dict):
+        return
 
     name_to_category: dict[str, str] = {}
-    for cat, names in categories.items():
-        for n in names:
-            name_to_category[n] = cat
+    if isinstance(categories, dict):
+        for cat, names in categories.items():
+            if isinstance(names, list):
+                for n in names:
+                    name_to_category[n] = cat
 
     for name, data in icons.items():
+        if not isinstance(data, dict):
+            continue
         body = data.get("body")
         if not body:
             continue
@@ -101,19 +155,22 @@ def iter_icons(coll: dict) -> Iterable[tuple[str, str, dict]]:
         }
         yield name, svg, meta
 
-    for alias, data in aliases.items():
-        parent = data.get("parent")
-        if parent in icons:
-            body = icons[parent].get("body")
-            if body:
-                w = icons[parent].get("width", width)
-                h = icons[parent].get("height", height)
-                yield alias, build_svg(body, w, h), {
-                    "name": alias,
-                    "alias_of": parent,
-                    "width": w,
-                    "height": h,
-                }
+    if isinstance(aliases, dict):
+        for alias, data in aliases.items():
+            if not isinstance(data, dict):
+                continue
+            parent = data.get("parent")
+            if parent in icons and isinstance(icons[parent], dict):
+                body = icons[parent].get("body")
+                if body:
+                    w = icons[parent].get("width", width)
+                    h = icons[parent].get("height", height)
+                    yield alias, build_svg(body, w, h), {
+                        "name": alias,
+                        "alias_of": parent,
+                        "width": w,
+                        "height": h,
+                    }
 
 
 def download(
@@ -148,17 +205,18 @@ def download(
             try:
                 coll = fetch_collection(prefix)
             except Exception as e:  # noqa: BLE001
-                log.error("Failed to fetch %s: %s", prefix, e)
+                log.error("Failed to fetch %s: %s -> skipping", prefix, e)
                 continue
 
             coll_dir = output_dir / prefix
             coll_dir.mkdir(parents=True, exist_ok=True)
 
             count = 0
+            icons_dict = coll.get("icons", {}) if isinstance(coll, dict) else {}
             for name, svg, meta in tqdm(
                 iter_icons(coll),
                 desc=prefix,
-                total=len(coll.get("icons", {})),
+                total=len(icons_dict),
                 leave=False,
             ):
                 svg_path = coll_dir / f"{name}.svg"
